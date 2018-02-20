@@ -1,0 +1,25 @@
+create database My_File_Server;
+
+create table User(
+	user_id int NOT NULL AUTO_INCREMENT,
+	user_name varchar(40) DEFAULT '', 
+	salt varchar(13) DEFAULT '', 
+	ciphertext varchar(128) DEFAULT '',
+   	user_dir varchar(256) DEFAULT '', 	
+	PRIMARY KEY(user_id),
+   	UNIQUE KEY(user_name)	
+)ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+
+create table File(
+	pre_file_id int NOT NULL, 
+	file_id int NOT NULL AUTO_INCREMENT,
+	filename varchar(256) DEFAULT '',
+	type char(1) DEFAULT '', 
+	owner varchar(40) DEFAULT '', 
+	owner_id int NOT NULL, 
+	md5 char(32) NOT NULL,
+	PRIMARY KEY(file_id),
+	UNIQUE KEY(md5)
+	CONSTRAINT FOREIGN KEY(owner_id) REFERENCES User(user_id)
+)ENGINE=InnoDB DEFAULT CHARSET=utf8;
