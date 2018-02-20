@@ -57,6 +57,7 @@ int login(int sfd)	//账户登陆验证
 			return -1;
 		}
 	}
+	return 0;
 }
 
 int signup(int sfd) //用户注册
@@ -121,7 +122,7 @@ int signup(int sfd) //用户注册
 					recvn(sfd, data_pac.buf, data_pac.len);	//接收服务器返回消息
 					if(data_pac.state == 8) //重名
 					{
-						OK == -2; //表示重名
+						OK = -2; //表示重名
 						printf("%s\n", data_pac.buf);
 					}
 					else if(data_pac.state == 9) //没有重名
@@ -444,7 +445,11 @@ cmd_start:
 						}
 						close(fd);
 					}	
-				}			
+				}
+				else
+				{
+					printf("%s\n", data_pac.buf);
+				}
 			}
 		}
 

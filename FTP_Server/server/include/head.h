@@ -30,6 +30,7 @@
 #include <mysql/mysql.h>
 #include <sys/sendfile.h>
 #include <openssl/md5.h>
+#include <syslog.h>
 
 #define RESOURCE_FILE_DIR "../../RESOURCE"
 #define DEBUG

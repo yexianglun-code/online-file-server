@@ -133,6 +133,7 @@ int main(int argc, char *argv[])
 	}
 
 
+	openlog("ftpserver", LOG_PID | LOG_NOWAIT | LOG_CONS, LOG_USER); //日志
 	////服务端开始工作，接受客户端连接，安排线程接客
 	while(1)
 	{
@@ -168,6 +169,7 @@ int main(int argc, char *argv[])
 				}
 				printf("main thread exit...pid=%d\n", getpid());
 				mysql_close(conn);
+				closelog(); //日志
 				exit(0); //主线程最后退出
 			}
 			if(evs[i].data.fd == sfd)	//客户端有连接请求
@@ -181,6 +183,8 @@ int main(int argc, char *argv[])
 				que_set(pq, pnew);	//新任务入队			
 				pthread_mutex_unlock(&pq->que_mutex);	//解锁
 				pthread_cond_signal(&pfactory->cond);	//唤醒子线程
+		
+				syslog(LOG_INFO, "IP=%s%s\n", inet_ntoa(client_addr.sin_addr) , " is connected");
 			}
 		}
 	}

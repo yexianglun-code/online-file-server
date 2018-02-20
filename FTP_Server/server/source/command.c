@@ -13,7 +13,23 @@ void command(MYSQL *conn, int sfd, int user_id) //解析客户端发送过来的
 
 		if(data_pac.state == 51 || data_pac.len == 52) //客户端退出下线
 		{
-			printf("client is exiting, newfd=%d\n", sfd);
+			//printf("client is exiting, newfd=%d\n", sfd);
+			
+			char log_username[64]={0};
+			char query[600];
+			MYSQL_RES *res;
+			MYSQL_ROW row;
+			int ret, db_num_rows;
+			sprintf(query, "select user_name from User where user_id=%d", user_id);
+			db_select(conn, query, &res, &ret);
+			db_num_rows = mysql_num_rows(res);
+			if(db_num_rows > 0)
+			{
+				row = mysql_fetch_row(res);
+				strcpy(log_username, row[0]);
+			}
+
+			syslog(LOG_INFO|LOG_USER, "username=%s 下线\n", log_username);
 			return;
 		}
 		else if(data_pac.state == 101) //命令cd
@@ -55,10 +71,23 @@ void command(MYSQL *conn, int sfd, int user_id) //解析客户端发送过来的
 void cmd_cd(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//进入指定目录
 {
 	char src_path[256], abs_path[256], relative_path[256], query[600];
-   	int user_dir_file_id;
-	int ret;
+   	char log_username[64]={0};
+	int user_dir_file_id;
+	int ret, db_num_rows;
+	MYSQL_RES *res;
+	MYSQL_ROW row;
 	Data_pac data_pac;
 	
+	bzero(query, sizeof(query));
+	sprintf(query, "select user_name from User where user_id=%d", user_id);
+	db_select(conn, query, &res, &ret);
+	db_num_rows = mysql_num_rows(res);
+	if(db_num_rows > 0)
+	{
+		row = mysql_fetch_row(res);
+		strcpy(log_username, row[0]);
+	}
+
 	bzero(src_path, sizeof(src_path));
 	bzero(abs_path, sizeof(abs_path));
 	bzero(relative_path, sizeof(relative_path));
@@ -76,6 +105,8 @@ void cmd_cd(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//进入指定
 		bzero(&data_pac, sizeof(Data_pac));
 		if(ret == 0)
 		{
+			syslog(LOG_INFO|LOG_USER, "username=%s \"cd %s\" 成功\n", log_username, cmd_content);
+
 			data_pac.state = 1002; //表示cd成功
 			strcpy(data_pac.buf, "cd成功\n");
 			data_pac.len = strlen(data_pac.buf);
@@ -83,18 +114,24 @@ void cmd_cd(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//进入指定
 		}
 		else
 		{
+			syslog(LOG_INFO|LOG_USER, "username=%s \"cd %s\" 失败\n", log_username, cmd_content);
+			
 			data_pac.state = 1003; //表示cd失败
 			strcpy(data_pac.buf, "cd失败\n");
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 		}
 	}
+	else
+	{
+		syslog(LOG_INFO|LOG_USER, "username=%s \"cd %s\" 失败\n", log_username, cmd_content);
+	}
 	return;
 }
 
 void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标目录下文件信息
 {
-	char query[600], md5_file_path[256];
+	char query[600], md5_file_path[256], log_username[64]={0};
 	int i, ret, len;
 	int db_num_rows, cur_dir_file_id;
 	time_t timep;
@@ -124,17 +161,17 @@ void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标
 		}
 		mysql_free_result(res); //避免内存泄漏
 	}
-	else //否则为指定目标目录
-	{
-		char src_path[256], abs_path[256], relative_path[256];
-		int cur_dir_file_id;
-
-		bzero(src_path, sizeof(src_path));
-		bzero(abs_path, sizeof(abs_path));
-		bzero(relative_path, sizeof(relative_path));
-		strcpy(src_path, cmd_content);
-		ret = get_path(conn, sfd, user_id, src_path, abs_path, relative_path, &cur_dir_file_id);
-	}
+//	else //否则为指定目标目录
+//	{
+//		char src_path[256], abs_path[256], relative_path[256];
+//		int cur_dir_file_id;
+//
+//		bzero(src_path, sizeof(src_path));
+//		bzero(abs_path, sizeof(abs_path));
+//		bzero(relative_path, sizeof(relative_path));
+//		strcpy(src_path, cmd_content);
+//		ret = get_path(conn, sfd, user_id, src_path, abs_path, relative_path, &cur_dir_file_id);
+//	}
 
 	if(ret == 0)
 	{
@@ -185,6 +222,15 @@ void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标
 			}
 			mysql_free_result(res); //避免内存泄漏
 		}
+		else if(db_num_rows == 0) //没有文件
+		{
+			bzero(&data_pac, sizeof(Data_pac));
+			data_pac.state = 1022; //ls失败，空文件夹
+			sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+	
+			syslog(LOG_INFO|LOG_USER, "username=%s \"ls %s\" 空文件夹\n", log_username, cmd_content);
+			return;
+		}
 	
 		bzero(&data_pac, sizeof(Data_pac));
 		for(i=0, len=0;i<db_num_rows;i++)
@@ -193,9 +239,13 @@ void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标
 			//len = strlen(data_pac.buf); //考虑data_pac.buf大小是否足以装下所用信息
 			//if(len
 		}
+		strcpy(log_username, file_info_buf[0].owner);
 		data_pac.len = strlen(data_pac.buf);
 		sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送结果给客户端
 	}
+
+	syslog(LOG_INFO|LOG_USER, "username=%s \"ls %s\" 成功\n", log_username, cmd_content);
+	
 	return;
 }
 
@@ -205,18 +255,23 @@ void cmd_pwd(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//显示用�
 	int db_num_rows, ret;
 	MYSQL_RES *res;
 	MYSQL_ROW row;
-	char dst[10] = "user_dir";
+	char dst[20] = "user_name,user_dir";
+	char log_username[64]={0};
 	ret = db_get_user_info_by_id(conn, user_id, dst, &res);
 	db_num_rows = mysql_num_rows(res);
 	if(db_num_rows > 0)
 	{
 		row = mysql_fetch_row(res);
+		strcpy(log_username, row[0]);
 		bzero(&data_pac, sizeof(data_pac));
-		sprintf(data_pac.buf, "%s\n", row[0]); //用户当前所在路径
+		sprintf(data_pac.buf, "%s\n", row[1]); //用户当前所在路径
 		data_pac.len = strlen(data_pac.buf);
 		sendn(sfd, (char *)&data_pac, data_pac.len + 6); //返回结果给客户端
 	}
 	mysql_free_result(res); //避免内存泄漏
+	
+	syslog(LOG_INFO|LOG_USER, "username=%s \"pwd\" 成功\n", log_username);
+	
 	return;
 }
 
@@ -265,6 +320,9 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
 			mysql_free_result(res); //避免内存泄漏
+				
+			syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 文件重名\n", owner, cmd_content);
+			
 			return;
 		}
 
@@ -324,6 +382,9 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 					data_pac.state = 1082; //表示客户端puts文件成功
 					data_pac.len = 0;
 					sendn(sfd, (char *)&data_pac, data_pac.len + 6);  //通知客户端上传文件成功
+				
+					syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 成功\n", owner, cmd_content);
+				
 				}
 				else
 				{
@@ -331,6 +392,9 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 					data_pac.state = 1083; //表示客户端puts文件失败
 					data_pac.len = 0;
 					sendn(sfd, (char *)&data_pac, data_pac.len + 6);  //通知客户端上传文件失败
+					
+					syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 失败\n", owner, cmd_content);
+				
 				}
 				close(fd);
 			}
@@ -338,7 +402,7 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 			{
 				close(fd);
 				unlink(tmp_filename);
-				printf("客户端上传异常\n");
+				syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 异常\n", owner, cmd_content);
 				//客户端传输异常
 			}
 		}
@@ -357,12 +421,13 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 	//int dir_file_id;
 	char dst[20] = {0};
 	char filename[128] = {0};
+	char log_username[64]={0};
 	//char src_path[256] = {0};
 	//char abs_path[256] = {0}, relative_path[256] = {0};
 	MYSQL_RES *res;
 	MYSQL_ROW row;
 
-	strcpy(dst,	"user_dir_file_id");
+	strcpy(dst,	"user_name,user_dir_file_id");
 	//strcpy(src_path, cmd_content);
 	
 //	split_path(src_path, filename);
@@ -378,13 +443,14 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 		Data_pac data_pac;
 
 		row = mysql_fetch_row(res);
-		pre_file_id = atoi(row[0]); //当前目录的id
+		strcpy(log_username, row[0]);
+		pre_file_id = atoi(row[1]); //当前目录的id
 		//pre_file_id = dir_file_id;
 		mysql_free_result(res); //避免内存泄漏
 		
 		/////检查此目录下是否有此文件
 		bzero(query, sizeof(query));
-		strcpy(query, "select md5 from File where pre_file_id=");	
+		strcpy(query, "select md5,type from File where pre_file_id=");	
 		sprintf(query, "%s%d%s'%s'", query, pre_file_id, " and filename=", filename);
 		db_select(conn, query, &res, &ret);
 		db_num_rows = -11;
@@ -397,11 +463,15 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端错误
 			mysql_free_result(res); //避免内存泄漏
+					
+			syslog(LOG_INFO|LOG_USER, "username=%s \"gets %s\" 当前目录没有此文件\n", log_username, cmd_content);
+			
 			return;
 		}
 		else if(db_num_rows > 0)//有此文件，可以下载
 		{
 			char md5_filepath[256] = {0};
+			char type[2]={0};
 			int fd;
 
 			bzero(&data_pac, sizeof(Data_pac));
@@ -411,6 +481,20 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 			row = mysql_fetch_row(res);
 
 			sprintf(md5_filepath, "%s/%s", RESOURCE_FILE_DIR, row[0]);
+			strcpy(type, row[1]); //文件类型
+			if(strcmp(type, "d") == 0) //不支持下载目录
+			{
+				bzero(&data_pac, sizeof(Data_pac));
+				data_pac.state = 1067; //表示是目录不可下载
+				strcpy(data_pac.buf, "不能下载目录\n");
+				data_pac.len = strlen(data_pac.buf);
+				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
+			
+				syslog(LOG_INFO|LOG_USER, "username=%s \"gets %s\" 不能下载目录\n", log_username, cmd_content);
+			
+				return;
+			}
+
 			bzero(&data_pac, sizeof(Data_pac));
 			data_pac.state = 1069; //表示服务器端可以开始好发送文件
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
@@ -435,7 +519,7 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 					recvn(sfd, data_pac.buf, data_pac.len);
 					if(data_pac.state == 1072)
 					{
-						printf("客户端下载完毕\n");
+						syslog(LOG_INFO|LOG_USER, "username=%s \"gets %s\" 成功\n", log_username, cmd_content);
 					}
 				}
 				else if(ret == -1)
@@ -443,6 +527,8 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 					bzero(&data_pac, sizeof(Data_pac));
 					data_pac.state = 1075; // 表示服务端出错，发送中止
 					sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+						
+					syslog(LOG_INFO|LOG_USER, "username=%s \"gets %s\" 失败\n", log_username, cmd_content);
 				}
 			}
 			mysql_free_result(res); //避免内存泄漏
@@ -453,6 +539,7 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户删除文件
 {
 	char filename[128], md5_filepath[256], query[600];
+	char log_username[64]={0};
 	int ret;
 	int db_num_rows;
 	int pre_file_id;
@@ -465,6 +552,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 	strcpy(filename, cmd_content); //要删除的文件的文件名
 	sprintf(query, "%s%d", "select user_dir_file_id from User where user_id=", user_id);
 	db_select(conn, query, &res, &ret);
+	db_num_rows = 0;
 	db_num_rows = mysql_num_rows(res);
 	if(db_num_rows > 0)
 	{
@@ -473,7 +561,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 		mysql_free_result(res); //避免内存泄漏
 	}
 	bzero(query, sizeof(query));
-	sprintf(query, "%s%d%s'%s'", "select file_id,md5 from File where pre_file_id=", pre_file_id, " and filename=", filename); //同一目录下文件不重名
+	sprintf(query, "%s%d%s'%s'", "select file_id,md5,owner from File where pre_file_id=", pre_file_id, " and filename=", filename); //同一目录下文件不重名
 	db_select(conn, query, &res, &ret);
 	db_num_rows = 0;
 	db_num_rows = mysql_num_rows(res);
@@ -484,6 +572,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 		file_id = atoi(row[0]); //要删除的文件的file_id
 		bzero(md5_filepath, sizeof(md5_filepath));
 		sprintf(md5_filepath, "%s/%s", RESOURCE_FILE_DIR, row[1]); //实际文件的路径
+		strcpy(log_username, row[2]);
 		mysql_free_result(res); //避免内存泄漏
 		
 		////先删除数据库File表中的文件的记录，再去文件夹中删除实际文件
@@ -500,25 +589,33 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 				strcpy(data_pac.buf, "remove:删除文件成功\n");
 				data_pac.len = strlen(data_pac.buf);
 				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
+						
+				syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 成功\n", log_username, cmd_content);
 			}
 			else if(ret == -1)
 			{
 				perror("unlink");
 				bzero(&data_pac, sizeof(Data_pac));
-				data_pac.state = 1103; //表示服务器删除文件成功
+				data_pac.state = 1103; //表示服务器删除文件失败
 				strcpy(data_pac.buf, "remove:删除文件失败\n");
 				data_pac.len = strlen(data_pac.buf);
 				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
+				
+				syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败\n", log_username, cmd_content);
+				
 				return;
 			}
 		}
 		else
 		{
 			bzero(&data_pac, sizeof(Data_pac));
-			data_pac.state = 1103; //表示服务器删除文件成功
+			data_pac.state = 1103; //表示服务器删除文件失败
 			strcpy(data_pac.buf, "remove:删除文件失败\n");
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
+				
+			syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败\n", log_username, cmd_content);
+			
 			return;
 		}
 	}
@@ -527,6 +624,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 void cmd_mkdir(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户创建目录
 {
 	char query[600], dirname[128] = {0}, md5_buf[64] = {0};
+	char log_username[64]={0};
 	unsigned char src_str[128] = {0};
 	int ret, db_num_rows;
 	int pre_file_id;
@@ -549,7 +647,8 @@ void cmd_mkdir(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户创
 	{
 		row = mysql_fetch_row(res);
 		pre_file_id = atoi(row[1]);
-		
+		strcpy(log_username, row[0]);
+
 		bzero(query, sizeof(query));
 		sprintf(query, "%s(%d,'%s','%s','%s',%d,'%s')", "insert into File(pre_file_id, filename, type, owner, owner_id, md5) values", pre_file_id, dirname, "d", row[0], user_id, md5_buf);
 		mysql_free_result(res); //避免内存泄漏
@@ -562,6 +661,8 @@ void cmd_mkdir(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户创
 			strcpy(data_pac.buf, "mkdir:成功\n");
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+				
+			syslog(LOG_INFO|LOG_USER, "username=%s \"mkdir %s\" 成功\n", log_username, cmd_content);
 		}
 		else
 		{
@@ -570,6 +671,8 @@ void cmd_mkdir(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户创
 			strcpy(data_pac.buf, "mkdir:失败\n");
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+			
+			syslog(LOG_INFO|LOG_USER, "username=%s \"mkdir %s\" 失败\n", log_username, cmd_content);
 		}
 	}
 }

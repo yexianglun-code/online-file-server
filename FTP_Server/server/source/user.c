@@ -18,6 +18,7 @@ int get_user_info(MYSQL *conn, char *user_name, MYSQL_RES **res)
 int user_verify(MYSQL *conn, int sfd, int *user_id)
 {
 	char salt[12] = { 0 }, ciphertext[128] = { 0 };
+	char log_username[64]={0};
 	int ret, db_num_rows;
 	MYSQL_RES *res;
 	MYSQL_ROW row;
@@ -29,6 +30,7 @@ int user_verify(MYSQL *conn, int sfd, int *user_id)
 	recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
 	recvn(sfd, data_pac.buf, data_pac.len);	//接收用户名
 
+	strcpy(log_username, data_pac.buf);
 	if(data_pac.state == 54)
 	{
 		return -1; //用户要求注册
@@ -66,6 +68,9 @@ int user_verify(MYSQL *conn, int sfd, int *user_id)
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6);	//发送登陆成功消息
 			mysql_free_result(res);
+
+			syslog(LOG_INFO|LOG_USER, "username=%s login successfully\n", log_username);
+
 			return 1;	//表示验证成功
 		}
 		else
@@ -76,6 +81,9 @@ int user_verify(MYSQL *conn, int sfd, int *user_id)
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送错误提示
 			mysql_free_result(res);
+			
+			syslog(LOG_ERR|LOG_USER, "username=%s 登陆失败\n", log_username);
+			
 			return 0; //表示用户名或密码错误
 		}
 	}
@@ -205,6 +213,8 @@ int user_signup(MYSQL *conn, int sfd)
 	strcpy(data_pac.buf, "注册成功\n");
 	data_pac.len = strlen(data_pac.buf);
 	sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+	
+	syslog(LOG_INFO|LOG_USER, "username=%s 注册成功\n", user_name);
 
 	return 1; //表示注册成功
 }
