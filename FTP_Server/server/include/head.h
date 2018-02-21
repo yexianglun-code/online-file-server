@@ -32,7 +32,7 @@
 #include <openssl/md5.h>
 #include <syslog.h>
 
-#define RESOURCE_FILE_DIR "../../RESOURCE"
+#define RESOURCE_FILE_DIR "../RESOURCE"
 #define DEBUG
 
 typedef struct
@@ -48,7 +48,7 @@ typedef struct
 	//			3:登陆验证成功
 	//			4:用户名或密码错误
 	//			5:未知错误
-	//			6:提示用户注册
+	//			6:允许用户注册
 	//			7:不允许用户注册
 	//			8:用户注册名重名
 	//			9:用户注册名未重名
@@ -60,7 +60,7 @@ typedef struct
 	//			51:用户正常退出下线
 	//			52:用户强制退出下线
 	//			53:用户掉线
-	//			54:用户要注册
+	//			54:用户想要注册
 	//			55:用户不想注册
 	//			....
 	//

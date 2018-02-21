@@ -1,6 +1,6 @@
 #include "./include/function.h"
 
-int login(int sfd)	//账户登陆验证
+int login(int sfd, char *name)	//账户登陆验证
 {
 	char user_name[64];
 	char *passwd, *ciphertext;
@@ -10,6 +10,8 @@ int login(int sfd)	//账户登陆验证
 	bzero(user_name, sizeof(user_name));
 	printf("请输入用户名:");
 	scanf(" %s", user_name); //输入用户名
+
+	strcpy(name, user_name);
 
 	bzero(&data_pac, sizeof(Data_pac));
 	strcpy(data_pac.buf, user_name);
@@ -211,17 +213,39 @@ int check_user_signup_name(char *user_name) //检查注册用户名
 
 int command(int sfd, char *user_name) //客户端命令接口界面
 {
-	int len;
-	char cmd_str[532], cmd[10], cmd_content[512];
+	int len, i;
+	char cmd_str[600], cmd[10], cmd_content[512];
+	char tmpc;
 	Data_pac data_pac;
 
 	user_help(); //一开始登陆，默认弹出帮助
 
+	int j=0;
 cmd_start:
-	printf("[%s@dd网盘]> ", user_name);
-	fflush(stdout);
-	while(bzero(cmd_str, sizeof(cmd_str)), (len = read(0, cmd_str, sizeof(cmd_str))) > 0) //用户输入命令
+	while(1) //用户输入命令
 	{
+		if(j++ > 0)
+		{
+			printf("[%s@dd网盘]> ", user_name);
+			fflush(stdout);
+		}
+		i = 0;
+		bzero(cmd_str, sizeof(cmd_str));
+		fflush(stdin);
+		while((tmpc = getchar()) != '\n' && i < 600)
+		{
+			if(tmpc == '\b')
+			{
+				printf("\b");
+				fflush(stdout);
+			}
+			else
+			{
+				cmd_str[i++] = tmpc;
+			}
+		}
+		//len = read(0, cmd_str, sizeof(cmd_str));
+		
 		bzero(cmd, sizeof(cmd));
 		bzero(cmd_content, sizeof(cmd_content));
 		get_cmd(cmd_str, cmd, cmd_content);	//剥离出具体命令
@@ -532,8 +556,8 @@ cmd_start:
 
 		}
 
-		printf("[%s@dd网盘]> ", user_name);
-		fflush(stdout);
+		//printf("[%s@dd网盘]> ", user_name);
+		//fflush(stdout);
 	}
 }
 

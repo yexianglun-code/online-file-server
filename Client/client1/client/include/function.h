@@ -3,7 +3,7 @@
 #include "head.h"
 #include "transfile.h"
 
-int login(int sfd); //账户登陆验证
+int login(int sfd, char *user_name); //账户登陆验证
 int signup(int sfd); //用户注册
 int check_user_signup_name(char *user_name); //检查注册用户名
 int command(int sfd, char *user_name); //客户端命令接口界面

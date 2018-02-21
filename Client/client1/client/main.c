@@ -41,6 +41,8 @@ int main(int argc, char *argv[])	//argv[1]是ip，argv[2]是端口号
 
 
 	int serv_num;
+	char user_name[64]={0};
+		
 	//char tmp_ch;
 	printf("1.登陆\n");
 	printf("2.注册\n");
@@ -51,7 +53,7 @@ int main(int argc, char *argv[])	//argv[1]是ip，argv[2]是端口号
 	{
 		//system("clear");
 		/////账户验证登陆
-		ret = login(sfd);	
+		ret = login(sfd, user_name);	
 		if(ret == 0) //提示用户注册
 		{
 			ret = signup(sfd);
@@ -90,7 +92,7 @@ int main(int argc, char *argv[])	//argv[1]是ip，argv[2]是端口号
 	{
 		if(!fork())
 		{	//子进程
-			ret = command(sfd, argv[1]);
+			ret = command(sfd, user_name);
 			if(ret == 0)
 			{
 				exit(0); //子进程退出

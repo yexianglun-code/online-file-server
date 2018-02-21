@@ -82,7 +82,7 @@ int user_verify(MYSQL *conn, int sfd, int *user_id)
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送错误提示
 			mysql_free_result(res);
 			
-			syslog(LOG_ERR|LOG_USER, "username=%s 登陆失败\n", log_username);
+			syslog(LOG_ERR|LOG_USER, "username=%s 登陆失败,用户名或密码错误\n", log_username);
 			
 			return 0; //表示用户名或密码错误
 		}
