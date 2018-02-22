@@ -21,7 +21,6 @@ int login(int sfd, char *name)	//账户登陆验证
 	recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 	recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state)); //接收用户名检测结果
 	recvn(sfd, data_pac.buf, data_pac.len);
-	printf("data_pac.state=%d\n",data_pac.state);
 
 	if(data_pac.state == 1)	//用户名不存在
 	{
@@ -213,7 +212,7 @@ int check_user_signup_name(char *user_name) //检查注册用户名
 
 int command(int sfd, char *user_name) //客户端命令接口界面
 {
-	int len, i;
+	int i;
 	char cmd_str[600], cmd[10], cmd_content[512];
 	char tmpc;
 	Data_pac data_pac;
@@ -221,6 +220,7 @@ int command(int sfd, char *user_name) //客户端命令接口界面
 	user_help(); //一开始登陆，默认弹出帮助
 
 	int j=0;
+	system("stty erase ^H"); //为了实现退格删除输入
 cmd_start:
 	while(1) //用户输入命令
 	{
@@ -236,7 +236,7 @@ cmd_start:
 		{
 			if(tmpc == '\b')
 			{
-				printf("\b");
+				printf("\b \b");
 				fflush(stdout);
 			}
 			else
@@ -244,12 +244,10 @@ cmd_start:
 				cmd_str[i++] = tmpc;
 			}
 		}
-		//len = read(0, cmd_str, sizeof(cmd_str));
 		
 		bzero(cmd, sizeof(cmd));
 		bzero(cmd_content, sizeof(cmd_content));
 		get_cmd(cmd_str, cmd, cmd_content);	//剥离出具体命令
-		//printf("cmd=%s,cmd_content=%s\n", cmd, cmd_content);
 
 		bzero(&data_pac,sizeof(Data_pac));
 		strcpy(data_pac.buf, cmd_content); //命令内容
@@ -332,10 +330,12 @@ cmd_start:
 		else if(strcmp(cmd, "puts") == 0)    
 		{
 			int ret;
+			char filename[128]={0};
 			char file_path[256] = { 0 };
 			check_filename(data_pac.buf, &ret); //检查文件名是否合法
 			if(ret == 1)
 			{
+				strcpy(filename, data_pac.buf);
 				sprintf(file_path, "%s/%s", MY_FILE_DIR, data_pac.buf); //要上传的文件的路径
 				data_pac.state = 104; //表示puts命令
 				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送命令(发送文件名)
@@ -344,7 +344,6 @@ cmd_start:
 				recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
 				recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
 
-				printf("data_pac.state = %d\n", data_pac.state);
 				if(data_pac.state == 1086) //服务端可以开始接收文件了
 				{
 					bzero(&data_pac, sizeof(Data_pac));
@@ -353,21 +352,16 @@ cmd_start:
 
 					/////////////////////*传送文件*////////////////////
 					ret = transfile(sfd, file_path); 
-					//printf("1\n");
 					if(ret == 1)
 					{
 						bzero(&data_pac, sizeof(Data_pac));
 						data_pac.state = 1090; //表示客户端发送完毕
 						sendn(sfd, (char *)&data_pac, data_pac.len + 6); 
 
-						//printf("2\n");
 						bzero(&data_pac, sizeof(Data_pac));
 						recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
-						//printf("3\n");
 						recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-						//printf("4\n");
 						recvn(sfd, data_pac.buf, data_pac.len);
-						//printf("5\n");
 						if(data_pac.state == 1082)
 						{
 							printf("puts 成功\n");
@@ -406,6 +400,9 @@ cmd_start:
 		{
 			int ret;
 			char file_path[256] = { 0 };
+			char filename[128]={0};
+			off_t filesize; //文件大小
+
 			check_filename(data_pac.buf, &ret); //检查输入文件名是否合法
 			if(ret != 1)
 			{
@@ -413,6 +410,7 @@ cmd_start:
 			}
 			else
 			{
+				strcpy(filename, data_pac.buf);
 				sprintf(file_path, "%s/%s", MY_DOWNLOAD_DIR, data_pac.buf);//下载文件的存放位置
 				data_pac.state = 105; //表示gets命令
 				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送命令(发送文件名)
@@ -437,13 +435,15 @@ cmd_start:
 					recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
 					recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
-
+					
+					filesize = atoll(data_pac.buf);
 					if(data_pac.state == 1069) //服务端准备好了
 					{
 						bzero(&data_pac, sizeof(Data_pac));
 						data_pac.state = 1068; //表示客户端准备好了
 						sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 
+						off_t download_len_of_file = 0;
 						///////////////////////*从服务端下载文件*//////////////////////////
 						while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0)
 						{
@@ -453,7 +453,11 @@ cmd_start:
 								break;
 							}
 							recvn(sfd, data_pac.buf, data_pac.len);
-							write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
+							download_len_of_file += write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
+							
+							printf("%s ", filename);
+							print_progress_bar(download_len_of_file, filesize);	//打印进度条
+	
 						}
 						if(data_pac.state == 1074) //服务端发送完毕
 						{
@@ -555,9 +559,6 @@ cmd_start:
 		{
 
 		}
-
-		//printf("[%s@dd网盘]> ", user_name);
-		//fflush(stdout);
 	}
 }
 
@@ -626,11 +627,31 @@ void check_filename(char *path, int *ret) //检查文件名是否合法
 	}
 }
 
+void print_progress_bar(off_t download_len_of_file, off_t filesize) //打印下载进度条
+{
+	int rate = 0;
+	char str[102] = {0};
+	const char * ptr = "|/-\\";
+	if(download_len_of_file <= filesize)
+	{
+		rate = (int)((double)download_len_of_file/(double)filesize * 100);
+		for(int i=0;i<=rate;i++)
+		{
+			str[i] = '='; 
+		}
+		printf("[%-100s] [%d\%][%c]\r", str, rate, ptr[rate%4]);
+		fflush(stdout);
+		if(rate == 100)
+		{
+			printf("\n");
+		}
+	}
+}
 
 void user_help() //用户帮助函数
 {
 	printf("------------------------------------------------------------------------------------------------------------------\n");
-	printf("-------------------------------------------------------膜法指南-------------------------------------------------------\n");
+	printf("---------------------------------------------------膜法指南-------------------------------------------------------\n");
 	printf("------------------------------------------------------------------------------------------------------------------\n\n");
 	
 	printf("命令:\n");
@@ -689,13 +710,3 @@ void user_help() //用户帮助函数
 	printf("		注意:不支持路径分析，[目录名]中不要包含路径\n");
 	printf("\n");
 }
-
-
-
-
-
-
-
-
-
-

@@ -2,9 +2,8 @@
 
 int transfile(int sfd, char *file_path) //传输文件
 {
-	//printf("file_path=%s\n", file_path);
 	Data_pac data_pac;
-	int ret, fd;
+	int ret, fd, filelen;
 	struct stat filestat;
 	
 	fd = open(file_path, O_RDONLY);
@@ -13,16 +12,21 @@ int transfile(int sfd, char *file_path) //传输文件
 		perror("open");
 		return -2;
 	}
-	//fstat(fd, &filestat);
+
+	filelen = 0;
+	bzero(&filestat, sizeof(filestat));
+	fstat(fd, &filestat);
 	//sendfile(sfd, fd, NULL, filestat.st_size);	//零拷贝传送文件
 	while(bzero(&data_pac, sizeof(data_pac)), (data_pac.len = read(fd, data_pac.buf, sizeof(data_pac.buf))) > 0)
 	{
+		filelen += data_pac.len;
 		ret = sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 		if(-1 == ret)
 		{
 			close(fd);
 			return -1; //表示出错
 		}
+		print_progress_bar(filelen, filestat.st_size);
 	}
 	close(fd);
 	return 1; //表示发送完毕

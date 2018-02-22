@@ -23,5 +23,6 @@ int get_dir_id(MYSQL *conn, int sfd, int user_id, char *dirname, int pre_file_id
 void get_dst_dir(char *src_path, char *dst_path); //获取目标目录
 void split_path(char *path, char *filename); //从路径提取文件名
 void get_dir(char *file_path, char *dir_buf[], int *num_of_dir, int max_num_dir); //获取各级目录名
+void my_lltoa(char *dst, off_t filesize); //将文件大小(off_t)转换成字符串
 
 #endif

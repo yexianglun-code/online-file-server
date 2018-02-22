@@ -480,6 +480,7 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 			char md5_filepath[256] = {0};
 			char type[2]={0};
 			int fd;
+			struct stat filestat;
 
 			bzero(&data_pac, sizeof(Data_pac));
 			data_pac.state = 1064; //表示客户端可以下载此文件
@@ -502,10 +503,21 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 				return;
 			}
 
+			fd = open(md5_filepath, O_RDONLY);
+			if(-1 == fd)
+			{
+				perror("open");
+				return;
+			}
+			bzero(&filestat, sizeof(filestat));
+			fstat(fd, &filestat);
+
 			bzero(&data_pac, sizeof(Data_pac));
 			data_pac.state = 1069; //表示服务器端可以开始好发送文件
+			my_lltoa(data_pac.buf, filestat.st_size); //文件大小
+			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
-			
+
 			bzero(&data_pac, sizeof(Data_pac));
 			recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 			recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
@@ -513,7 +525,7 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 			if(data_pac.state == 1068) //客户端也准备好可以开始接收文件了
 			{
 				/////////////*传送文件给客户端*///////////////////
-				ret = transfile(sfd, md5_filepath); 
+				ret = transfile(sfd, fd); 
 				
 				if(ret == 1)
 				{
@@ -534,9 +546,10 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 					bzero(&data_pac, sizeof(Data_pac));
 					data_pac.state = 1075; // 表示服务端出错，发送中止
 					sendn(sfd, (char *)&data_pac, data_pac.len + 6);
-						
+
 					syslog(LOG_INFO|LOG_USER, "username=%s \"gets %s\" 失败, 当前路径=%s\n", log_username, cmd_content, log_dir);
 				}
+				close(fd);
 			}
 			mysql_free_result(res); //避免内存泄漏
 		}
@@ -1065,5 +1078,32 @@ void get_dir(char *file_path, char *dir_buf[], int *num_of_dir, int max_num_dir)
 	else if(i < max_num_dir)
 	{
 		*num_of_dir = i;
+	}
+}
+
+
+void my_lltoa(char *dst, off_t filesize) //将文件大小转换成字符串
+{
+	int i, digit;
+	int left, right;
+	char tmpc;
+
+	i = digit = 0;
+	while(filesize > 0)
+	{
+		digit = filesize % 10;
+		filesize /= 10;
+		dst[i++] = digit + '0';
+	}
+	
+	left = 0;
+	right = i-1;
+	while(left < right)
+	{
+		tmpc = dst[right];
+		dst[right] = dst[left];
+		dst[left] = tmpc;
+		left++;
+		right--;
 	}
 }

@@ -11,7 +11,7 @@ void get_cmd(char *cmd_str, char *cmd, char *cmd_content); //剥离命令字符�
 void check_path(char *path, int *ret); //检查路径是否合法
 void check_filename(char *path, int *ret); //检查文件名是否合法
 
-
+void print_progress_bar(off_t download_len, off_t filesize); //打印下载进度条
 void user_help(); //用户帮助函数
 
 #endif
