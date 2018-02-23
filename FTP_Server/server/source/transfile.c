@@ -5,19 +5,18 @@ int transfile(int sfd, int fd, int mode) //传输文件
 	Data_pac data_pac;
 	int ret;
 	
-	if(mode == 1)
+	if(1 == mode)
 	{
 		while(bzero(&data_pac, sizeof(data_pac)), (data_pac.len = read(fd, data_pac.buf, sizeof(data_pac.buf))) > 0)
 		{
 			ret = sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 			if(-1 == ret)
 			{
-				//close(fd);
 				return -1; //表示出错
 			}
 		}
 	}
-	else if(mode == 2)
+	else if(2 == mode)
 	{
 		struct stat filestat;
 		fstat(fd, &filestat);

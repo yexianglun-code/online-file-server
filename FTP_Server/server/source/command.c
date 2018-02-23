@@ -3,7 +3,6 @@
 void command(MYSQL *conn, int sfd, int user_id) //解析客户端发送过来的命令，并执行相应任务
 {
 	int ret;
-	char cmd_content[512];
 	Data_pac data_pac;
 
 	while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0) //接收命令长度
@@ -339,7 +338,6 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 		get_str_random(random_str, 63);
 		sprintf(tmp_filename, "%s/%s_%s_%s", RESOURCE_FILE_DIR, owner, filename, random_str); //拼接路径，生成临时文件名
 
-		//printf("tmp_filename=%s\n", tmp_filename);
 		fd = open(tmp_filename, O_RDWR | O_CREAT, 0664); //创建文件
 		if(-1 == fd)
 		{
@@ -356,22 +354,49 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 		recvn(sfd, data_pac.buf, data_pac.len);
 		if(data_pac.state == 1087) //表示客户端可以开始发送文件
 		{
-
-		////////////////////////*接收客户端上传的文件*///////////////////////////
-			while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0)
+			off_t filesize = atoll(data_pac.buf); //上传的文件大小
+			////////////////////////*接收客户端上传的文件*///////////////////////////
+			if(filesize <= FILE_LIMIT) //普通上传模式
 			{
-				recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-				if(data_pac.state == 1090 || data_pac.state == 1091)
-				{ //收到上传结束的信号
-					break;
+				while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0)
+				{
+					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+					if(data_pac.state == 1090 || data_pac.state == 1091)
+					{ //收到上传结束的信号
+						break;
+					}
+					recvn(sfd, data_pac.buf, data_pac.len);
+					write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
 				}
-				recvn(sfd, data_pac.buf, data_pac.len);
-				write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
 			}
-			//printf("1\n");
+			else //快速上传模式
+			{
+				int recv_buf_len = 0, file_len = 0;
+				char *recv_buf = (char *)calloc(FILE_LIMIT, sizeof(char)); 
+				while(1)
+				{
+					recv_buf_len = recv(sfd, recv_buf, FILE_LIMIT, 0);
+					if(-1 == recv_buf_len)
+					{
+						perror("recv");
+						syslog(LOG_PERROR|LOG_USER, "username=%s \"puts %s\" 失败,recv错误 当前路径=%s\n", log_username, cmd_content, log_dir);
+						return;
+					}
+					file_len +=  write(fd, recv_buf, recv_buf_len);
+					bzero(recv_buf, sizeof(recv_buf));
+					
+					if(file_len == filesize)
+					{
+						bzero(&data_pac, sizeof(Data_pac));
+						recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
+						recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+						recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
+						break;
+					}
+				}
+			}
 			if(data_pac.state == 1090) //传输文件结束
 			{
-				//printf("2\n");
 				char md5_str[33] = { 0 }, new_filename[256] = { 0 };
 
 				get_file_md5(tmp_filename, md5_str); //获取文件的客户端上传的文件的md5码值
@@ -381,7 +406,7 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 				strcpy(query, "insert into File(pre_file_id, filename, type, owner, owner_id, md5) values");
 				sprintf(query, "%s(%d,'%s','%s','%s',%d,'%s')", query, pre_file_id, filename, type, owner, user_id, md5_str); 
 				db_insert(conn, query, &ret); //将文件信息插入数据库
-				printf("ret= %d\n", ret);
+				//printf("ret= %d\n", ret);
 				if(ret == 0)
 				{
 					bzero(&data_pac, sizeof(Data_pac));
@@ -532,7 +557,7 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 				else //文件大小大于FILE_LIMIT
 				{
 					ret = transfile(sfd, fd, 2); //用sendfile方式进行传送，快速下载模式 
-					sleep(1);
+					usleep(100000);
 				}
 				if(ret == 1)
 				{
@@ -1087,7 +1112,6 @@ void get_dir(char *file_path, char *dir_buf[], int *num_of_dir, int max_num_dir)
 		*num_of_dir = i;
 	}
 }
-
 
 void my_lltoa(char *dst, off_t filesize) //将文件大小转换成字符串
 {

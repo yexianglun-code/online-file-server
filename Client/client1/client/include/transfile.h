@@ -3,7 +3,7 @@
 #include "head.h"
 #include "function.h"
 
-int transfile(int newfd, char *file_path);
+int transfile(int newfd, int fd, int mode);
 int sendn(int newfd, char *buf, int len);
 int recvn(int newfd, char *buf, int len);
 

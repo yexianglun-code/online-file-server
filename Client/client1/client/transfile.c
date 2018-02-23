@@ -1,34 +1,48 @@
 #include "./include/transfile.h"
 
-int transfile(int sfd, char *file_path) //传输文件
+int transfile(int sfd, int fd, int mode) //传输文件
 {
 	Data_pac data_pac;
-	int ret, fd, filelen;
+	int ret, upload_file_len;
 	struct stat filestat;
 	
-	fd = open(file_path, O_RDONLY);
-	if(-1 == fd)
-	{
-		perror("open");
-		return -2;
-	}
-
-	filelen = 0;
+	upload_file_len = 0;
 	bzero(&filestat, sizeof(filestat));
 	fstat(fd, &filestat);
-	//sendfile(sfd, fd, NULL, filestat.st_size);	//零拷贝传送文件
-	while(bzero(&data_pac, sizeof(data_pac)), (data_pac.len = read(fd, data_pac.buf, sizeof(data_pac.buf))) > 0)
+	if(1 == mode)
 	{
-		filelen += data_pac.len;
-		ret = sendn(sfd, (char *)&data_pac, data_pac.len + 6);
-		if(-1 == ret)
+		while(bzero(&data_pac, sizeof(data_pac)), (data_pac.len = read(fd, data_pac.buf, sizeof(data_pac.buf))) > 0)
 		{
-			close(fd);
-			return -1; //表示出错
+			upload_file_len += data_pac.len;
+			ret = sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+			if(-1 == ret)
+			{
+				return -1; //表示出错
+			}
+			print_progress_bar(upload_file_len, filestat.st_size);
 		}
-		print_progress_bar(filelen, filestat.st_size);
 	}
-	close(fd);
+	else if(2 == mode)
+	{
+		while(1)
+		{
+			ret = sendfile(sfd, fd, NULL, FILE_LIMIT);	//零拷贝传送文件
+			if(-1 == ret)
+			{
+				perror("sendfile");
+				return -1;
+			}
+			upload_file_len += ret;
+			if(upload_file_len <= filestat.st_size)
+			{
+				print_progress_bar(upload_file_len, filestat.st_size);
+			}
+			if(upload_file_len == filestat.st_size)
+			{
+				break;
+			}
+		}
+	}
 	return 1; //表示发送完毕
 }
 

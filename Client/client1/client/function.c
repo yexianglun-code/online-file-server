@@ -346,12 +346,37 @@ cmd_start:
 
 				if(data_pac.state == 1086) //服务端可以开始接收文件了
 				{
+					int fd = open(file_path, O_RDONLY);
+					struct stat filestat;
+					
+					if(-1 == fd)
+					{
+						perror("open");
+						return -1;
+					}
+					bzero(&filestat, sizeof(filestat));
+					ret = fstat(fd, &filestat);
+					if(-1 == ret)
+					{
+						perror("fstat");
+						return -1;
+					}
 					bzero(&data_pac, sizeof(Data_pac));
 					data_pac.state = 1087; //表示客户端可以开始上传文件
+					my_lltoa(data_pac.buf, filestat.st_size); //要上传的文件大小
+					data_pac.len = strlen(data_pac.buf);
 					sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 
-					/////////////////////*传送文件*////////////////////
-					ret = transfile(sfd, file_path); 
+					/////////////////////*传送文件*////////////////////					
+					if(filestat.st_size <= FILE_LIMIT) //普通上传模式
+					{
+						ret = transfile(sfd, fd, 1); 
+					}
+					else //快速上传模式（sendfile方式）
+					{
+						ret = transfile(sfd, fd, 2);
+						usleep(100000);
+					}
 					if(ret == 1)
 					{
 						bzero(&data_pac, sizeof(Data_pac));
@@ -377,6 +402,7 @@ cmd_start:
 						data_pac.state = 1091; //表示客户端出错,发送中止
 						sendn(sfd, (char *)&data_pac, data_pac.len + 6); 
 					}
+					close(fd);
 				}
 				else if(data_pac.state == 1088) //文件重名
 				{
@@ -677,6 +703,32 @@ void print_progress_bar(off_t download_len_of_file, off_t filesize) //打印下�
 		{
 			printf("\n");
 		}
+	}
+}
+
+void my_lltoa(char *dst, off_t filesize) //将文件大小转换成字符串
+{
+	int i, digit;
+	int left, right;
+	char tmpc;
+
+	i = digit = 0;
+	while(filesize > 0)
+	{
+		digit = filesize % 10;
+		filesize /= 10;
+		dst[i++] = digit + '0';
+	}
+	
+	left = 0;
+	right = i-1;
+	while(left < right)
+	{
+		tmpc = dst[right];
+		dst[right] = dst[left];
+		dst[left] = tmpc;
+		left++;
+		right--;
 	}
 }
 
