@@ -525,8 +525,15 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 			if(data_pac.state == 1068) //客户端也准备好可以开始接收文件了
 			{
 				/////////////*传送文件给客户端*///////////////////
-				ret = transfile(sfd, fd); 
-				
+				if(filestat.st_size <= FILE_LIMIT) //如果文件小于等于FILE_LIMIT
+				{
+					ret = transfile(sfd, fd, 1); //普通下载模式 
+				}
+				else //文件大小大于FILE_LIMIT
+				{
+					ret = transfile(sfd, fd, 2); //用sendfile方式进行传送，快速下载模式 
+					sleep(1);
+				}
 				if(ret == 1)
 				{
 					bzero(&data_pac, sizeof(Data_pac));

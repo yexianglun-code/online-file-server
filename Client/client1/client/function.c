@@ -436,7 +436,7 @@ cmd_start:
 					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
 					recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
 					
-					filesize = atoll(data_pac.buf);
+					filesize = atoll(data_pac.buf); //要下载的文件大小
 					if(data_pac.state == 1069) //服务端准备好了
 					{
 						bzero(&data_pac, sizeof(Data_pac));
@@ -445,19 +445,51 @@ cmd_start:
 
 						off_t download_len_of_file = 0;
 						///////////////////////*从服务端下载文件*//////////////////////////
-						while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0)
+						if(filesize <= FILE_LIMIT) //普通下载方式
 						{
-							recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-							if(data_pac.state == 1074 || data_pac.state == 1075)
-							{ //收到服务端传送完毕的信号
-								break;
+							while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0)
+							{
+								recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+								if(data_pac.state == 1074 || data_pac.state == 1075)
+								{ //收到服务端传送完毕的信号
+									break;
+								}
+								recvn(sfd, data_pac.buf, data_pac.len);
+								download_len_of_file += write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
+								
+								printf("%s ", filename);
+								print_progress_bar(download_len_of_file, filesize);	//打印进度条
+							}	
+						}
+						else //服务端用sendfile方式提供下载
+						{
+							int recv_buf_len = 0;
+							char *recv_buf = (char *)calloc(FILE_LIMIT, sizeof(char)); 
+							while(1)
+							{
+								recv_buf_len = recv(sfd, recv_buf, FILE_LIMIT, 0);
+								if(-1 == recv_buf_len)
+								{
+									perror("recv");
+									break;
+								}
+								download_len_of_file +=  write(fd, recv_buf, recv_buf_len);
+								bzero(recv_buf, sizeof(recv_buf));
+								
+								if(download_len_of_file <= filesize)
+								{
+									printf("%s ", filename);
+									print_progress_bar(download_len_of_file, filesize);	//打印进度条
+								}
+								if(download_len_of_file == filesize)
+								{
+									bzero(&data_pac, sizeof(Data_pac));
+									recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
+									recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+									recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
+									break;
+								}
 							}
-							recvn(sfd, data_pac.buf, data_pac.len);
-							download_len_of_file += write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
-							
-							printf("%s ", filename);
-							print_progress_bar(download_len_of_file, filesize);	//打印进度条
-	
 						}
 						if(data_pac.state == 1074) //服务端发送完毕
 						{

@@ -32,6 +32,7 @@
 
 #define MY_FILE_DIR "../CLIENT_RESOURCE/myfile"
 #define MY_DOWNLOAD_DIR "../CLIENT_RESOURCE/download"
+#define FILE_LIMIT 104857600  //上传下载文件的大小界限100MB，小于等于此界限用普通方式上传下载，大于此界限用sendfile方式
 #define DEBUG
 
 typedef struct
