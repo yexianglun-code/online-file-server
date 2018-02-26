@@ -134,7 +134,6 @@ int signup(int sfd) //用户注册
 			}
 			if(OK == 1) //用户名OK
 			{
-
 				bzero(&data_pac, sizeof(Data_pac));
 				recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 				recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
@@ -344,11 +343,16 @@ cmd_start:
 				recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
 				recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
 
-				if(data_pac.state == 1086) //服务端可以开始接收文件了
+				if(data_pac.state == 1088) //文件重名
+				{
+					printf("%s\n", data_pac.buf); //打印服务端返回错误
+				}
+				else if(data_pac.state == 1086) //服务端可以开始接收文件了
 				{
 					int fd = open(file_path, O_RDONLY);
+					char md5_str[33] = {0};
 					struct stat filestat;
-					
+
 					if(-1 == fd)
 					{
 						perror("open");
@@ -356,6 +360,7 @@ cmd_start:
 					}
 					bzero(&filestat, sizeof(filestat));
 					ret = fstat(fd, &filestat);
+					get_file_md5(file_path, md5_str);
 					if(-1 == ret)
 					{
 						perror("fstat");
@@ -363,50 +368,64 @@ cmd_start:
 					}
 					bzero(&data_pac, sizeof(Data_pac));
 					data_pac.state = 1087; //表示客户端可以开始上传文件
+					strcpy(data_pac.buf, md5_str); //文件MD5码值
+					data_pac.len = strlen(data_pac.buf);
+					sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+
+					bzero(&data_pac, sizeof(Data_pac));
 					my_lltoa(data_pac.buf, filestat.st_size); //要上传的文件大小
 					data_pac.len = strlen(data_pac.buf);
 					sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 
-					/////////////////////*传送文件*////////////////////					
-					if(filestat.st_size <= FILE_LIMIT) //普通上传模式
+					bzero(&data_pac, sizeof(data_pac));
+					recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
+					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+					recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
+					
+					if(1093 == data_pac.state) //非秒传
 					{
-						ret = transfile(sfd, fd, 1); 
-					}
-					else //快速上传模式（sendfile方式）
-					{
-						ret = transfile(sfd, fd, 2);
-						usleep(100000);
-					}
-					if(ret == 1)
-					{
-						bzero(&data_pac, sizeof(Data_pac));
-						data_pac.state = 1090; //表示客户端发送完毕
-						sendn(sfd, (char *)&data_pac, data_pac.len + 6); 
+						/////////////////////*传送文件*////////////////////					
+						if(filestat.st_size <= FILE_LIMIT) //普通上传模式
+						{
+							ret = transfile(sfd, fd, 1); 
+						}
+						else //快速上传模式（sendfile方式）
+						{
+							ret = transfile(sfd, fd, 2);
+							//usleep(100000);
+						}
+						//if(ret == 1)
+						//{
+							//bzero(&data_pac, sizeof(Data_pac));
+							//data_pac.state = 1090; //表示客户端发送完毕
+							//sendn(sfd, (char *)&data_pac, data_pac.len + 6); 
 
-						bzero(&data_pac, sizeof(Data_pac));
-						recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
-						recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-						recvn(sfd, data_pac.buf, data_pac.len);
-						if(data_pac.state == 1082)
-						{
-							printf("puts 成功\n");
-						}
-						else if(data_pac.state == 1083)
-						{
-							printf("put 失败\n");
-						}
+						//}
+						//else if(ret == -1)
+						//{
+						//	bzero(&data_pac, sizeof(Data_pac));
+						//	data_pac.state = 1091; //表示客户端出错,发送中止
+						//	sendn(sfd, (char *)&data_pac, data_pac.len + 6); 
+						//}
 					}
-					else if(ret == -1)
+					else if(1092 == data_pac.state) //秒传
 					{
-						bzero(&data_pac, sizeof(Data_pac));
-						data_pac.state = 1091; //表示客户端出错,发送中止
-						sendn(sfd, (char *)&data_pac, data_pac.len + 6); 
+						printf("%s ", filename);
+						print_progress_bar(1, 1);
+					}
+					bzero(&data_pac, sizeof(Data_pac));
+					recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
+					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+					recvn(sfd, data_pac.buf, data_pac.len);
+					if(data_pac.state == 1082)
+					{
+						printf("puts 成功\n");
+					}
+					else if(data_pac.state == 1083)
+					{
+						printf("put 失败\n");
 					}
 					close(fd);
-				}
-				else if(data_pac.state == 1088) //文件重名
-				{
-					printf("%s\n", data_pac.buf); //打印服务端返回错误
 				}
 				else
 				{
@@ -436,10 +455,28 @@ cmd_start:
 			}
 			else
 			{
+				int fd;
+				struct stat filestat;
+
 				strcpy(filename, data_pac.buf);
-				sprintf(file_path, "%s/%s", MY_DOWNLOAD_DIR, data_pac.buf);//下载文件的存放位置
+				sprintf(file_path, "%s/%s", MY_DOWNLOAD_DIR, filename);//下载文件的存放位置
+				fd = open(file_path, O_RDWR|O_CREAT, 0664);
+				if(-1 == fd)
+				{
+					perror("open");
+					goto cmd_start;
+				}
+				bzero(&filestat, sizeof(filestat));
+				fstat(fd, &filestat);
+				lseek(fd, filestat.st_size, SEEK_SET); //偏移到上次下载的地方
+				
+				bzero(&data_pac, sizeof(Data_pac));
 				data_pac.state = 105; //表示gets命令
-				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送命令(发送文件名)
+				sprintf(data_pac.buf, "%s %ld", filename, filestat.st_size);
+				printf("data_pac.buf = %s\n", data_pac.buf);
+				data_pac.len = strlen(data_pac.buf);
+				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送命令(发送文件名和大小)
+
 				bzero(&data_pac, sizeof(Data_pac));
 				recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 				recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
@@ -447,22 +484,17 @@ cmd_start:
 				if(data_pac.state == 1065) //服务器没有此文件
 				{
 					printf("%s\n", data_pac.buf);
+					close(fd);
+					unlink(file_path); //删除文件
 				}
 				else if(data_pac.state == 1064) //可以下载此文件
 				{
-					int fd = open(file_path, O_RDWR|O_CREAT, 0664);
-					if(-1 == fd)
-					{
-						perror("open");
-						goto cmd_start;
-					}
-
 					bzero(&data_pac, sizeof(Data_pac));
 					recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-					recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
-					
+					recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号	
 					filesize = atoll(data_pac.buf); //要下载的文件大小
+
 					if(data_pac.state == 1069) //服务端准备好了
 					{
 						bzero(&data_pac, sizeof(Data_pac));
@@ -476,15 +508,19 @@ cmd_start:
 							while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0)
 							{
 								recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-								if(data_pac.state == 1074 || data_pac.state == 1075)
-								{ //收到服务端传送完毕的信号
-									break;
-								}
+								//if(data_pac.state == 1074 || data_pac.state == 1075)
+								//{ //收到服务端传送完毕的信号
+								//	break;
+								//}
 								recvn(sfd, data_pac.buf, data_pac.len);
 								download_len_of_file += write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
 								
 								printf("%s ", filename);
 								print_progress_bar(download_len_of_file, filesize);	//打印进度条
+								if(download_len_of_file == filesize)
+								{
+									break;
+								}
 							}	
 						}
 						else //服务端用sendfile方式提供下载
@@ -502,39 +538,38 @@ cmd_start:
 								download_len_of_file +=  write(fd, recv_buf, recv_buf_len);
 								bzero(recv_buf, sizeof(recv_buf));
 								
-								if(download_len_of_file <= filesize)
-								{
-									printf("%s ", filename);
-									print_progress_bar(download_len_of_file, filesize);	//打印进度条
-								}
+								printf("%s ", filename);
+								print_progress_bar(download_len_of_file, filesize);	//打印进度条
 								if(download_len_of_file == filesize)
 								{
-									bzero(&data_pac, sizeof(Data_pac));
-									recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
-									recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-									recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
+								//	bzero(&data_pac, sizeof(Data_pac));
+								//	recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
+								//	recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+								//	recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
 									break;
 								}
 							}
 						}
-						if(data_pac.state == 1074) //服务端发送完毕
-						{
+						//if(data_pac.state == 1074) //服务端发送完毕
+						//{
 							bzero(&data_pac, sizeof(Data_pac));
 							data_pac.state = 1072; //表示客户端下载完成
 							sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知服务端
 							printf("下载完毕\n");
-						}
-						else if(data_pac.state == 1075) //服务端出错，发送中止
-						{
-							printf("服务端出错，下载中止\n");
-							unlink(file_path); //删除文件
-						}
+						//}
+						//else if(data_pac.state == 1075) //服务端出错，发送中止
+						//{
+						//	printf("服务端出错，下载中止\n");
+						//	unlink(file_path); //删除文件
+						//}
 						close(fd);
 					}	
 				}
 				else
 				{
 					printf("%s\n", data_pac.buf);
+					close(fd);
+					unlink(file_path); //删除文件
 				}
 			}
 		}
@@ -730,6 +765,45 @@ void my_lltoa(char *dst, off_t filesize) //将文件大小转换成字符串
 		left++;
 		right--;
 	}
+}
+
+int get_file_md5(const char *file_path, char *md5_str) //由路径file_path中的目标文件的内容生成32位MD5码字符串，存入md5_str
+{
+	int i, ret;
+	int fd;
+	unsigned char data[1024];
+	unsigned char md5_value[16];
+	MD5_CTX md5;
+
+	fd = open(file_path, O_RDONLY);
+	if(-1 == fd)
+	{
+		perror("open");
+		return -1;
+	}
+	MD5_Init(&md5);
+	while(1)
+	{
+		ret = read(fd, data, 1024);
+		if(-1 == ret)
+		{
+			perror("read");
+			return -1;
+		}
+		MD5_Update(&md5, data, ret);
+		if(0 == ret || ret < 1024)
+		{
+			break;
+		}
+	}
+	close(fd);
+	MD5_Final(md5_value, &md5);
+	for(i=0; i < 16;i++)
+	{
+		snprintf(md5_str + i*2, 2+1, "%02x", md5_value[i]);
+	}
+	md5_str[32] = '\0';
+	return 0;
 }
 
 void user_help() //用户帮助函数

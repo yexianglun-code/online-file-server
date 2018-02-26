@@ -5,7 +5,7 @@ void command(MYSQL *conn, int sfd, int user_id) //解析客户端发送过来的
 	int ret;
 	Data_pac data_pac;
 
-	while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0) //接收命令长度
+	while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 1) //接收命令长度
 	{
 		recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
 		recvn(sfd, data_pac.buf, data_pac.len);	//接收命令内容
@@ -296,7 +296,7 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 	db_num_rows = mysql_num_rows(res);
 	if(db_num_rows > 0)
 	{
-		char type[2] = "f", md5_str[33] = { 0 };
+		char type[2] = "f";
 		char owner[64] = { 0 };
 		char query[600] = { 0 };
    		char filename[128] = { 0 };
@@ -332,6 +332,7 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 		}
 
 		char tmp_filename[256] = { 0 };//临时文件名
+		char new_filename[256] = { 0 };
 		char random_str[64] = { 0 }; 		
 		int fd;
 
@@ -348,94 +349,164 @@ void cmd_puts(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户上�
 		bzero(&data_pac, sizeof(Data_pac));
 		data_pac.state = 1086; //表示可以开始接收客户端上传文件
 		sendn(sfd, (char *)&data_pac, data_pac.len + 6); //通知客户端
+		
 		bzero(&data_pac, sizeof(Data_pac));
 		recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 		recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
 		recvn(sfd, data_pac.buf, data_pac.len);
 		if(data_pac.state == 1087) //表示客户端可以开始发送文件
 		{
+			char client_md5_str[33] = {0};
+			strcpy(client_md5_str, data_pac.buf); //客户端上传文件的MD5码值
+			bzero(query, sizeof(query));
+			sprintf(query, "%s'%s'", "select link_num from File where md5=", client_md5_str);
+			db_select(conn, query, &res, &ret);
+			db_num_rows = mysql_num_rows(res);
+			
+			bzero(&data_pac, sizeof(Data_pac));
+			recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
+			recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+			recvn(sfd, data_pac.buf, data_pac.len);
 			off_t filesize = atoll(data_pac.buf); //上传的文件大小
-			////////////////////////*接收客户端上传的文件*///////////////////////////
-			if(filesize <= FILE_LIMIT) //普通上传模式
+			
+			if(db_num_rows > 0) //秒传
 			{
-				while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 0)
-				{
-					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-					if(data_pac.state == 1090 || data_pac.state == 1091)
-					{ //收到上传结束的信号
-						break;
-					}
-					recvn(sfd, data_pac.buf, data_pac.len);
-					write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
-				}
+				bzero(&data_pac, sizeof(Data_pac));
+				data_pac.state = 1092; //可以秒传
+				sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+
+				int link_num;
+				row = mysql_fetch_row(res);
+				link_num = atoi(row[0]);
+
+				bzero(query, sizeof(query));
+				sprintf(query, "%s(%d,'%s','%s','%s',%d,'%s')", "insert into File(pre_file_id, filename, type, owner, owner_id, md5) values", pre_file_id, filename, "f", owner, user_id, client_md5_str);
+				db_insert(conn, query, &ret);
+				unlink(tmp_filename);
+
+				bzero(query, sizeof(query));
+				sprintf(query, "%s%d%s'%s'", "update File set link_num=", link_num+1, " where md5=", client_md5_str);
+				db_update(conn, query, &ret);
 			}
-			else //快速上传模式
+			else if(0 == db_num_rows) //正常上传
 			{
-				int recv_buf_len = 0, file_len = 0;
-				char *recv_buf = (char *)calloc(FILE_LIMIT, sizeof(char)); 
-				while(1)
+				bzero(&data_pac, sizeof(Data_pac));
+				data_pac.state = 1093; //不可以秒传
+				sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+
+				off_t upload_file_len = 0;
+				////////////////////////*接收客户端上传的文件*///////////////////////////
+				if(filesize <= FILE_LIMIT) //普通上传模式
 				{
-					recv_buf_len = recv(sfd, recv_buf, FILE_LIMIT, 0);
-					if(-1 == recv_buf_len)
+					while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 1)
 					{
-						perror("recv");
-						syslog(LOG_PERROR|LOG_USER, "username=%s \"puts %s\" 失败,recv错误 当前路径=%s\n", log_username, cmd_content, log_dir);
+						recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+						//if(data_pac.state == 1090 || data_pac.state == 1091)
+						//{ //收到上传结束的信号
+						//	break;
+						//}
+						recvn(sfd, data_pac.buf, data_pac.len);
+						upload_file_len += write(fd, data_pac.buf, data_pac.len); //把从客户端接收的文件内容写入本地磁盘中
+						if(upload_file_len == filesize)
+						{
+							break;
+						}
+					}
+					if(-1 == ret)
+					{
+						syslog(LOG_ERR|LOG_USER, "username=%s \"puts %s\" 失败,recv错误 当前路径=%s\n", log_username, cmd_content, log_dir);
+						close(fd);
+						unlink(tmp_filename);
 						return;
 					}
-					file_len +=  write(fd, recv_buf, recv_buf_len);
-					bzero(recv_buf, sizeof(recv_buf));
-					
-					if(file_len == filesize)
+					else if(0 == ret) //客户端断线
 					{
-						bzero(&data_pac, sizeof(Data_pac));
-						recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
-						recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
-						recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
-						break;
+						syslog(LOG_ERR|LOG_USER, "username=%s \"puts %s\" 失败,recv_buf_len=0,客户端断线 当前路径=%s\n", log_username, cmd_content, log_dir);
+						close(fd);
+						unlink(tmp_filename);
+						return;
 					}
 				}
-			}
-			if(data_pac.state == 1090) //传输文件结束
-			{
-				char md5_str[33] = { 0 }, new_filename[256] = { 0 };
+				else //快速上传模式
+				{
+					int recv_buf_len = 0;
+					char *recv_buf = (char *)calloc(FILE_LIMIT, sizeof(char)); 
+					while(1)
+					{
+						recv_buf_len = recv(sfd, recv_buf, FILE_LIMIT, 0);
+						if(-1 == recv_buf_len)
+						{
+							perror("recv");
+							syslog(LOG_ERR|LOG_USER, "username=%s \"puts %s\" 失败,recv错误 当前路径=%s\n", log_username, cmd_content, log_dir);
+							close(fd);
+							unlink(tmp_filename);
+							return;
+						}
+						else if(0 == recv_buf_len)
+						{
+							syslog(LOG_ERR|LOG_USER, "username=%s \"puts %s\" 失败,recv_buf_len=0,客户端断线 当前路径=%s\n", log_username, cmd_content, log_dir);
+							close(fd);
+							unlink(tmp_filename);
+							return;
+						}
+						upload_file_len +=  write(fd, recv_buf, recv_buf_len);
+						bzero(recv_buf, sizeof(recv_buf));
+						
+						if(upload_file_len == filesize)
+						{
+							//bzero(&data_pac, sizeof(Data_pac));
+							//recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
+							//recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
+							//recvn(sfd, data_pac.buf, data_pac.len); //接收服务器的通知信号
+							break;
+						}
+					}
+				}
+				//if(data_pac.state == 1090) //传输文件结束
+				//{
+					char md5_str[33] = { 0 };
 
-				get_file_md5(tmp_filename, md5_str); //获取文件的客户端上传的文件的md5码值
-				sprintf(new_filename, "%s/%s", RESOURCE_FILE_DIR, md5_str);
-				rename(tmp_filename, new_filename); //将客户端上传的文件重命名
-				bzero(query, sizeof(query));
-				strcpy(query, "insert into File(pre_file_id, filename, type, owner, owner_id, md5) values");
-				sprintf(query, "%s(%d,'%s','%s','%s',%d,'%s')", query, pre_file_id, filename, type, owner, user_id, md5_str); 
-				db_insert(conn, query, &ret); //将文件信息插入数据库
-				//printf("ret= %d\n", ret);
-				if(ret == 0)
-				{
-					bzero(&data_pac, sizeof(Data_pac));
-					data_pac.state = 1082; //表示客户端puts文件成功
-					data_pac.len = 0;
-					sendn(sfd, (char *)&data_pac, data_pac.len + 6);  //通知客户端上传文件成功
-				
-					syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 成功, 当前路径=%s\n", log_username, cmd_content, log_dir);
-				
-				}
-				else
-				{
-					bzero(&data_pac, sizeof(Data_pac));
-					data_pac.state = 1083; //表示客户端puts文件失败
-					data_pac.len = 0;
-					sendn(sfd, (char *)&data_pac, data_pac.len + 6);  //通知客户端上传文件失败
+					get_file_md5(tmp_filename, md5_str); //获取文件的客户端上传的文件的md5码值
+					sprintf(new_filename, "%s/%s", RESOURCE_FILE_DIR, md5_str);
+					rename(tmp_filename, new_filename); //将客户端上传的文件重命名
+					bzero(query, sizeof(query));
+					strcpy(query, "insert into File(pre_file_id, filename, type, owner, owner_id, md5) values");
+					sprintf(query, "%s(%d,'%s','%s','%s',%d,'%s')", query, pre_file_id, filename, type, owner, user_id, md5_str); 
+					db_insert(conn, query, &ret); //将文件信息插入数据库
+					//printf("ret= %d\n", ret);
 					
-					syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 失败, 当前路径=%s\n", log_username, cmd_content, log_dir);
-				
-				}
-				close(fd);
+					bzero(query, sizeof(query));
+					sprintf(query, "%s%d%s'%s'", "update File set link_num=", 1, " where md5=", client_md5_str);
+					db_update(conn, query, &ret);
 			}
-			else if(data_pac.state == 1091) //客户端传输异常
+			if(ret == 0)
 			{
-				close(fd);
-				unlink(tmp_filename);
-				syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 异常, 当前路径=%s\n", log_username, cmd_content, log_dir);
-				//客户端传输异常
+				bzero(&data_pac, sizeof(Data_pac));
+				data_pac.state = 1082; //表示客户端puts文件成功
+				sendn(sfd, (char *)&data_pac, data_pac.len + 6);  //通知客户端上传文件成功
+			
+				syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 成功, 当前路径=%s\n", log_username, cmd_content, log_dir);
+			
 			}
+			else
+			{
+				bzero(&data_pac, sizeof(Data_pac));
+				data_pac.state = 1083; //表示客户端puts文件失败
+				sendn(sfd, (char *)&data_pac, data_pac.len + 6);  //通知客户端上传文件失败
+				unlink(new_filename);
+				
+				syslog(LOG_ERR|LOG_USER, "username=%s \"puts %s\" 失败, 当前路径=%s\n", log_username, cmd_content, log_dir);
+			
+			}
+			close(fd);
+			//}
+			//else if(data_pac.state == 1091) //客户端传输异常
+			//{
+			//	close(fd);
+			//	unlink(tmp_filename);
+			//	syslog(LOG_INFO|LOG_USER, "username=%s \"puts %s\" 异常, 当前路径=%s\n", log_username, cmd_content, log_dir);
+			//	//客户端传输异常
+			//}
 		}
 		else
 		{
@@ -453,6 +524,7 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 	char dst[20] = {0};
 	char filename[128] = {0};
 	char log_username[64]={0}, log_dir[256]={0};
+	off_t have_downloaded_file_len = 0;
 	//char src_path[256] = {0};
 	//char abs_path[256] = {0}, relative_path[256] = {0};
 	MYSQL_RES *res;
@@ -464,7 +536,11 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 //	split_path(src_path, filename);
 //	ret = get_path(conn, sfd, user_id, src_path, abs_path, relative_path, &dir_file_id);
 
-	strcpy(filename, cmd_content);
+	//strcpy(filename, cmd_content);
+	sscanf(cmd_content, "%s%ld", filename, &have_downloaded_file_len);
+	printf("filename = %s\n", filename);
+	printf("have_downloaded_file_len = %ld\n", have_downloaded_file_len);
+
 	ret = db_get_user_info_by_id(conn, user_id, dst, &res);
 	db_num_rows = mysql_num_rows(res);
 	if(db_num_rows > 0)
@@ -536,10 +612,11 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 			}
 			bzero(&filestat, sizeof(filestat));
 			fstat(fd, &filestat);
+			lseek(fd, have_downloaded_file_len, SEEK_SET); //支持断点下载，偏移到上次下载的位置
 
 			bzero(&data_pac, sizeof(Data_pac));
 			data_pac.state = 1069; //表示服务器端可以开始好发送文件
-			my_lltoa(data_pac.buf, filestat.st_size); //文件大小
+			my_lltoa(data_pac.buf, filestat.st_size - have_downloaded_file_len); //文件大小
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
 
@@ -557,13 +634,13 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 				else //文件大小大于FILE_LIMIT
 				{
 					ret = transfile(sfd, fd, 2); //用sendfile方式进行传送，快速下载模式 
-					usleep(100000);
+					//usleep(100000);
 				}
 				if(ret == 1)
 				{
-					bzero(&data_pac, sizeof(Data_pac));
-					data_pac.state = 1074; // 表示服务端已经传送完毕
-					sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+					//bzero(&data_pac, sizeof(Data_pac));
+					//data_pac.state = 1074; // 表示服务端已经传送完毕
+					//sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 					bzero(&data_pac, sizeof(Data_pac));
 					recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
@@ -575,9 +652,9 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 				}
 				else if(ret == -1)
 				{
-					bzero(&data_pac, sizeof(Data_pac));
-					data_pac.state = 1075; // 表示服务端出错，发送中止
-					sendn(sfd, (char *)&data_pac, data_pac.len + 6);
+					//bzero(&data_pac, sizeof(Data_pac));
+					//data_pac.state = 1075; // 表示服务端出错，发送中止
+					//sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 
 					syslog(LOG_INFO|LOG_USER, "username=%s \"gets %s\" 失败, 当前路径=%s\n", log_username, cmd_content, log_dir);
 				}
@@ -595,6 +672,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 	int ret;
 	int db_num_rows;
 	int pre_file_id;
+	int link_num;
 	MYSQL_RES *res;
 	MYSQL_ROW row;
 	Data_pac data_pac;
@@ -615,17 +693,20 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 		mysql_free_result(res); //避免内存泄漏
 	}
 	bzero(query, sizeof(query));
-	sprintf(query, "%s%d%s'%s'", "select file_id,md5 from File where pre_file_id=", pre_file_id, " and filename=", filename); //同一目录下文件不重名
+	sprintf(query, "%s%d%s'%s'", "select file_id,md5,link_num from File where pre_file_id=", pre_file_id, " and filename=", filename); //同一目录下文件不重名
 	db_select(conn, query, &res, &ret);
 	db_num_rows = 0;
 	db_num_rows = mysql_num_rows(res);
 	if(db_num_rows > 0)
 	{
 		int file_id;
+		char md5_str[33] = {0};
 		row = mysql_fetch_row(res);
 		file_id = atoi(row[0]); //要删除的文件的file_id
 		bzero(md5_filepath, sizeof(md5_filepath));
+		strcpy(md5_str, row[1]);
 		sprintf(md5_filepath, "%s/%s", RESOURCE_FILE_DIR, row[1]); //实际文件的路径
+		link_num = atoi(row[2]); //文件链接数目
 		mysql_free_result(res); //避免内存泄漏
 		
 		////先删除数据库File表中的文件的记录，再去文件夹中删除实际文件
@@ -634,8 +715,17 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 		db_delete(conn, query, &ret); //删除数据库File表中文件的对应记录
 		if(ret == 0) //数据库中已删除成功
 		{
-			ret = unlink(md5_filepath); //再删除实际文件
-			if(ret == 0) //实际文件删除成功
+			if(link_num == 1) //链接数为1
+			{
+				ret = unlink(md5_filepath); //再删除实际文件
+			}
+			else
+			{
+				bzero(query, sizeof(query));
+				sprintf(query, "%s%d%s'%s'", "update File set link_num=", link_num-1, " where md5=", md5_str);
+				db_update(conn, query, &ret);
+			}
+			if(ret == 0) //文件删除成功
 			{
 				bzero(&data_pac, sizeof(Data_pac));
 				data_pac.state = 1102; //表示服务器删除文件成功
@@ -645,7 +735,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 						
 				syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 成功, 当前路径=%s\n", log_username, cmd_content, log_dir);
 			}
-			else if(ret == -1)
+			else
 			{
 				perror("unlink");
 				bzero(&data_pac, sizeof(Data_pac));
@@ -655,7 +745,6 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
 				
 				syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败, 当前路径=%s\n", log_username, cmd_content, log_dir);
-				
 				return;
 			}
 		}
@@ -667,7 +756,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
 				
-			syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败, 当前路径=%s\n", log_username, cmd_content, log_dir);
+			syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败,数据库删除记录失败 当前路径=%s\n", log_username, cmd_content, log_dir);
 			
 			return;
 		}

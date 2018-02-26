@@ -19,6 +19,7 @@ CREATE TABLE `File` (
 		`owner` varchar(40) DEFAULT '',
 		`owner_id` int(11) NOT NULL,
 		`md5` char(32) DEFAULT NULL,
+		`link_num` int(11) DEFAULT `0`,
 		PRIMARY KEY (`file_id`),
 		KEY `owner_id` (`owner_id`),
 		CONSTRAINT `File_ibfk_1` FOREIGN KEY (`owner_id`) REFERENCES `User` (`user_id

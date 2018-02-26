@@ -43,7 +43,7 @@ int sendn(int sfd, char buf[], int len)
 		}
 		total = total + ret;
 	}
-	return 0;
+	return 1;
 }
 
 int recvn(int sfd, char buf[], int len)
@@ -57,7 +57,11 @@ int recvn(int sfd, char buf[], int len)
 		{
 			return -1;
 		}
+		else if(0 == ret)
+		{
+			return 0;
+		}
 		total = total + ret;
 	}
-	return 0;
+	return 1;
 }
