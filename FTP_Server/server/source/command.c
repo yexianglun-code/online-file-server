@@ -4,6 +4,20 @@ void command(MYSQL *conn, int sfd, int user_id) //解析客户端发送过来的
 {
 	int ret;
 	Data_pac data_pac;
+	
+	char log_username[64]={0};
+	char query[600];
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	int db_num_rows;
+	sprintf(query, "select user_name from User where user_id=%d", user_id);
+	db_select(conn, query, &res, &ret);
+	db_num_rows = mysql_num_rows(res);
+	if(db_num_rows > 0)
+	{
+		row = mysql_fetch_row(res);
+		strcpy(log_username, row[0]);
+	}
 
 	while(bzero(&data_pac, sizeof(Data_pac)), (ret = recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len))) == 1) //接收命令长度
 	{
@@ -13,21 +27,6 @@ void command(MYSQL *conn, int sfd, int user_id) //解析客户端发送过来的
 		if(data_pac.state == 51 || data_pac.len == 52) //客户端退出下线
 		{
 			//printf("client is exiting, newfd=%d\n", sfd);
-			
-			char log_username[64]={0};
-			char query[600];
-			MYSQL_RES *res;
-			MYSQL_ROW row;
-			int ret, db_num_rows;
-			sprintf(query, "select user_name from User where user_id=%d", user_id);
-			db_select(conn, query, &res, &ret);
-			db_num_rows = mysql_num_rows(res);
-			if(db_num_rows > 0)
-			{
-				row = mysql_fetch_row(res);
-				strcpy(log_username, row[0]);
-			}
-
 			syslog(LOG_INFO|LOG_USER, "username=%s 下线\n", log_username);
 			return;
 		}
@@ -63,6 +62,14 @@ void command(MYSQL *conn, int sfd, int user_id) //解析客户端发送过来的
 		{
 
 		}
+	}
+	if(0 == ret)
+	{
+		syslog(LOG_INFO|LOG_USER, "username=%s  掉线\n", log_username);
+	}
+	else if(-1 == ret)
+	{
+		syslog(LOG_INFO|LOG_USER, "username=%s  客户端出错\n", log_username);
 	}
 	return;
 }
@@ -151,7 +158,7 @@ void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标
 	//if(is_empty(cmd_content) == true) //命令内容为空，则默认显示当前目录下的文件信息
 	//{
 		bzero(query, sizeof(query));
-		sprintf(query, "%s%d", "select user_dir_file_id,user_dir from User where user_id=", user_id);
+		sprintf(query, "%s%d", "select user_dir_file_id,user_dir,user_name from User where user_id=", user_id);
 		db_select(conn, query, &res, &ret);
 	   	db_num_rows = mysql_num_rows(res);
 		if(db_num_rows > 0)
@@ -159,6 +166,7 @@ void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标
 			row = mysql_fetch_row(res);
 			cur_dir_file_id = atoi(row[0]);
 			strcpy(log_dir, row[1]);
+			strcpy(log_username, row[2]);
 		}
 		mysql_free_result(res); //避免内存泄漏
 	//}
@@ -219,7 +227,6 @@ void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标
 					len = strlen(file_info_buf[i].file_mtime);
 					file_info_buf[i].file_mtime[len-1] = '\0'; //目录的时间为现在ls的时间
 				}
-
 			}
 			mysql_free_result(res); //避免内存泄漏
 		}
@@ -240,7 +247,6 @@ void cmd_ls(MYSQL *conn, int sfd, int user_id, char *cmd_content)	//展示目标
 			//len = strlen(data_pac.buf); //考虑data_pac.buf大小是否足以装下所用信息
 			//if(len
 		}
-		strcpy(log_username, file_info_buf[0].owner);
 		data_pac.len = strlen(data_pac.buf);
 		sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送结果给客户端
 	}
@@ -615,7 +621,7 @@ void cmd_gets(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户下�
 			lseek(fd, have_downloaded_file_len, SEEK_SET); //支持断点下载，偏移到上次下载的位置
 
 			bzero(&data_pac, sizeof(Data_pac));
-			data_pac.state = 1069; //表示服务器端可以开始好发送文件
+			data_pac.state = 1069; //表示服务器端可以开始发送文件
 			my_lltoa(data_pac.buf, filestat.st_size - have_downloaded_file_len); //文件大小
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
@@ -671,7 +677,7 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 	char log_username[64]={0}, log_dir[256]={0};
 	int ret;
 	int db_num_rows;
-	int pre_file_id;
+	int cur_dir_file_id;
 	int link_num;
 	MYSQL_RES *res;
 	MYSQL_ROW row;
@@ -687,13 +693,14 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 	if(db_num_rows > 0)
 	{
 		row = mysql_fetch_row(res);
-		pre_file_id = atoi(row[0]);
+		cur_dir_file_id = atoi(row[0]);
 		strcpy(log_dir, row[1]);
 		strcpy(log_username, row[2]);
 		mysql_free_result(res); //避免内存泄漏
 	}
+
 	bzero(query, sizeof(query));
-	sprintf(query, "%s%d%s'%s'", "select file_id,md5,link_num from File where pre_file_id=", pre_file_id, " and filename=", filename); //同一目录下文件不重名
+	sprintf(query, "%s%d%s'%s'", "select file_id,md5,link_num,type from File where pre_file_id=", cur_dir_file_id, " and filename=", filename); //同一目录下文件不重名
 	db_select(conn, query, &res, &ret);
 	db_num_rows = 0;
 	db_num_rows = mysql_num_rows(res);
@@ -701,25 +708,76 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 	{
 		int file_id;
 		char md5_str[33] = {0};
+		char type[2] = {0};
+
 		row = mysql_fetch_row(res);
 		file_id = atoi(row[0]); //要删除的文件的file_id
 		bzero(md5_filepath, sizeof(md5_filepath));
 		strcpy(md5_str, row[1]);
 		sprintf(md5_filepath, "%s/%s", RESOURCE_FILE_DIR, row[1]); //实际文件的路径
 		link_num = atoi(row[2]); //文件链接数目
+		strcpy(type, row[3]); //文件类型
 		mysql_free_result(res); //避免内存泄漏
 		
-		////先删除数据库File表中的文件的记录，再去文件夹中删除实际文件
-		bzero(query, sizeof(query));
-		sprintf(query, "%s%d", "delete from File where file_id=", file_id); 
-		db_delete(conn, query, &ret); //删除数据库File表中文件的对应记录
+		////先删除数据库File表中的文件的记录，再去文件夹中删除实际文件	
+		if(0 == strcmp(type, "d"))
+		{
+			//bzero(query, sizeof(query));
+			//sprintf(query, "%s%d", "select pre_file_id from File where file_id=", cur_dir_file_id);
+			//db_select(conn, query, &res, &ret);
+			//db_num_rows = mysql_num_rows(res);
+			//if(db_num_rows > 0)
+			//{
+			//	row = mysql_fetch_row(res);
+			//	if(0 == atoi(row[0])) //删除的是用户根目录，不允许
+			//	{
+			//		bzero(&data_pac, sizeof(Data_pac));
+			//		data_pac.state = 1103; //表示服务器删除文件失败
+			//		strcpy(data_pac.buf, "remove:不能删除用户根目录\n");
+			//		data_pac.len = strlen(data_pac.buf);
+			//		sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
+			//		mysql_free_result(res); //避免内存泄漏
+			//		
+			//		syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败,不能删除用户根目录 当前路径=%s\n", log_username, cmd_content, log_dir);
+			//		return;
+			//	}
+			//}
+			//mysql_free_result(res); //避免内存泄漏
+		
+			bzero(query, sizeof(query));
+			sprintf(query, "%s%d", "select * from File where pre_file_id=", file_id);
+			db_select(conn, query, &res, &ret);
+			db_num_rows = mysql_num_rows(res);
+			if(db_num_rows > 0)
+			{
+				bzero(&data_pac, sizeof(Data_pac));
+				data_pac.state = 1103; //表示服务器删除文件失败
+				strcpy(data_pac.buf, "remove:不能删除非空目录\n");
+				data_pac.len = strlen(data_pac.buf);
+				sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
+				mysql_free_result(res); //避免内存泄漏
+				
+				syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败,不能删除非空目录 当前路径=%s\n", log_username, cmd_content, log_dir);
+				return;
+			}
+
+			bzero(query, sizeof(query));
+			sprintf(query, "%s%d", "delete from File where file_id=", file_id); 
+			db_delete(conn, query, &ret); //删除数据库File表中文件的对应记录
+		}
+		else if(0 == strcmp(type, "f"))
+		{	
+			bzero(query, sizeof(query));
+			sprintf(query, "%s%d", "delete from File where file_id=", file_id); 
+			db_delete(conn, query, &ret); //删除数据库File表中文件的对应记录
+		}
 		if(ret == 0) //数据库中已删除成功
 		{
 			if(link_num == 1) //链接数为1
 			{
 				ret = unlink(md5_filepath); //再删除实际文件
 			}
-			else
+			else if(link_num > 1)
 			{
 				bzero(query, sizeof(query));
 				sprintf(query, "%s%d%s'%s'", "update File set link_num=", link_num-1, " where md5=", md5_str);
@@ -756,10 +814,20 @@ void cmd_remove(MYSQL *conn, int sfd, int user_id, char *cmd_content) //用户�
 			data_pac.len = strlen(data_pac.buf);
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
 				
-			syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败,数据库删除记录失败 当前路径=%s\n", log_username, cmd_content, log_dir);
-			
+			syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败,数据库删除记录失败 当前路径=%s\n", log_username, cmd_content, log_dir);		
 			return;
 		}
+	}
+	else if(0 == db_num_rows)
+	{
+		bzero(&data_pac, sizeof(Data_pac));
+		data_pac.state = 1103; //表示服务器删除文件失败
+		strcpy(data_pac.buf, "remove:当前文件夹下没有此文件\n");
+		data_pac.len = strlen(data_pac.buf);
+		sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知客户端
+			
+		syslog(LOG_INFO|LOG_USER, "username=%s \"remove %s\" 失败,当前文件夹下没有此文件 当前路径=%s\n", log_username, cmd_content, log_dir);		
+		return;
 	}
 }
 

@@ -116,7 +116,6 @@ int signup(int sfd) //用户注册
 					data_pac.len = strlen(data_pac.buf);
 					sendn(sfd, (char *)&data_pac, data_pac.len + 6); //告知服务端,查看是否重名
 					
-					
 					bzero(&data_pac, sizeof(Data_pac));
 					recvn(sfd, (char *)&data_pac.len, sizeof(data_pac.len));
 					recvn(sfd, (char *)&data_pac.state, sizeof(data_pac.state));
@@ -841,25 +840,24 @@ void user_help() //用户帮助函数
 	printf("	  pwd:\n");
     printf("		用法:pwd\n");
 	printf("		功能:显示用户当前所在绝对路径\n");
-	printf("		注意:不要尝试进入不存在的路径或别人的文件夹\n");
 	printf("\n");
 
 	printf("	  puts:\n");
     printf("		用法:puts [本地文件名]\n");
 	printf("		功能:上传客户端本地文件到服务器中的当前目录\n");
-	printf("		注意:不支持路径分析，[本地文件名]中不要包含路径，要上传的文件请提前放在client/CLIENT_RESOURCE/myfile中\n");
+	printf("		注意:不支持路径分析，[本地文件名]中不要包含路径，要上传的文件请提前放在CLIENT_RESOURCE/myfile中\n");
 	printf("\n");
 
 	printf("	  gets:\n");
     printf("		用法:gets [服务器文件名]\n");
 	printf("		功能:从服务器的用户当前目录下载文件到客户端的默认文件夹\n");
-	printf("		注意:不支持路径分析，[服务器文件名]中不要包含路径，下载存放的默认文件夹是client/CLIENT_RESOURCE/download\n");
+	printf("		注意:不支持路径分析，[服务器文件名]中不要包含路径，下载存放的默认文件夹是CLIENT_RESOURCE/download\n");
 	printf("\n");
 
 	printf("	  remove:\n");
-    printf("		用法:remove [服务器文件名]\n");
-	printf("		功能:将服务器的用户当前目录中删除文件\n");
-	printf("		注意:不支持路径分析，[服务器文件名]中不要包含路径\n");
+    printf("		用法:remove [服务器文件名或目录名]\n");
+	printf("		功能:将服务器的用户当前目录的指定文件删除\n");
+	printf("		注意:不支持路径分析，[服务器文件名]中不要包含路径，不能删除非空目录\n");
 	printf("\n");
 
 	printf("	  mkdir:\n");

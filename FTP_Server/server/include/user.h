@@ -5,7 +5,7 @@
 #include "transfile.h"
 
 int get_user_info(MYSQL *conn, char *user_name, MYSQL_RES **res);
-int user_verify(MYSQL *conn, int sfd, int *user_id);
-int user_signup(MYSQL *conn, int sfd);
+int user_verify(MYSQL *conn, int sfd, int *user_id, char *client_ip);
+int user_signup(MYSQL *conn, int sfd, char *client_ip);
 
 #endif

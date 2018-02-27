@@ -5,6 +5,7 @@
 typedef struct tag_node
 {
 	int nd_sockfd;
+	char nd_IP[16];
 	struct tag_node *nd_next;
 }node_t, *pnode_t;	//元素结构体，存储实际client fd(即存储任务)
 

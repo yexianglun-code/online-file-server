@@ -82,6 +82,12 @@ int main(int argc, char *argv[])	//argv[1]是ip，argv[2]是端口号
 			exit(0);
 		}
 	}
+	else
+	{
+		printf("输入有误\n");
+		return -1;
+	}
+
 
 
 	//////账户通过验证后，开始向服务器请求服务

@@ -174,17 +174,22 @@ int main(int argc, char *argv[])
 			}
 			if(evs[i].data.fd == sfd)	//客户端有连接请求
 			{
+				char client_addr_ip[16] = {0};
+				
 				bzero(&client_addr, sizeof(client_addr));
 				client_addr_len = sizeof(client_addr);
 				newfd = accept(sfd, (struct sockaddr *)&client_addr, &client_addr_len);
 				pnew = (pnode_t)calloc(1, sizeof(node_t));
-				pnew->nd_sockfd = newfd;
+				pnew->nd_sockfd = newfd; //新连接的socket fd
+				strcpy(client_addr_ip, inet_ntoa(client_addr.sin_addr));
+				strcpy(pnew->nd_IP, client_addr_ip); //新连接的IP地址
+
 				pthread_mutex_lock(&pq->que_mutex);	//上锁，互斥操作队列
 				que_set(pq, pnew);	//新任务入队			
 				pthread_mutex_unlock(&pq->que_mutex);	//解锁
 				pthread_cond_signal(&pfactory->cond);	//唤醒子线程
 		
-				syslog(LOG_INFO, "IP=%s%s\n", inet_ntoa(client_addr.sin_addr) , " is connected");
+				syslog(LOG_INFO, "IP=%s%s\n", client_addr_ip, " is connected");
 			}
 		}
 	}
@@ -217,7 +222,7 @@ void * th_func(void *p)	//线程入口函数
 			pthread_mutex_unlock(&pq->que_mutex);	//解锁
 			printf("child thread:I am busy, newfd=%d\n", pnode->nd_sockfd);
 			
-			ret = user_verify(conn, pnode->nd_sockfd, &user_id);	//账户验证
+			ret = user_verify(conn, pnode->nd_sockfd, &user_id, pnode->nd_IP);	//账户验证
 			if(ret == 1)	//ret==1,表示验证成功
 			{
 				printf("账户验证成功, newfd=%d\n", pnode->nd_sockfd);
@@ -228,7 +233,7 @@ void * th_func(void *p)	//线程入口函数
 				printf("账户验证失败, newfd=%d\n", pnode->nd_sockfd);
 				if(ret == -1)
 				{
-					ret = user_signup(conn, pnode->nd_sockfd); //注册
+					ret = user_signup(conn, pnode->nd_sockfd, pnode->nd_IP); //注册
 				}
 			}
 			close(pnode->nd_sockfd);

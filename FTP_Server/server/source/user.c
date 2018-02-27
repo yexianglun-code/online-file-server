@@ -15,7 +15,7 @@ int get_user_info(MYSQL *conn, char *user_name, MYSQL_RES **res)
 	}
 }
 
-int user_verify(MYSQL *conn, int sfd, int *user_id)
+int user_verify(MYSQL *conn, int sfd, int *user_id, char *client_ip)
 {
 	char salt[12] = { 0 }, ciphertext[128] = { 0 };
 	char log_username[64]={0};
@@ -69,7 +69,7 @@ int user_verify(MYSQL *conn, int sfd, int *user_id)
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6);	//发送登陆成功消息
 			mysql_free_result(res);
 
-			syslog(LOG_INFO|LOG_USER, "username=%s login successfully\n", log_username);
+			syslog(LOG_INFO|LOG_USER, "IP=%s username=%s login successfully\n", client_ip, log_username);
 
 			return 1;	//表示验证成功
 		}
@@ -82,7 +82,7 @@ int user_verify(MYSQL *conn, int sfd, int *user_id)
 			sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送错误提示
 			mysql_free_result(res);
 			
-			syslog(LOG_ERR|LOG_USER, "username=%s 登陆失败,用户名或密码错误\n", log_username);
+			syslog(LOG_ERR|LOG_USER, "IP=%s username=%s 登陆失败,用户名或密码错误\n", client_ip, log_username);
 			
 			return 0; //表示用户名或密码错误
 		}
@@ -96,12 +96,12 @@ int user_verify(MYSQL *conn, int sfd, int *user_id)
 		data_pac.len = strlen(data_pac.buf);
 		sendn(sfd, (char *)&data_pac, data_pac.len + 6); //发送用户名不存在消息
 			
-		syslog(LOG_ERR|LOG_USER, "username=%s 登陆失败,用户名不存在\n", log_username);
+		syslog(LOG_ERR|LOG_USER, "IP=%s username=%s 登陆失败,用户名不存在\n", client_ip, log_username);
 		return -1; //表示查询不到该用户，验证失败
 	}
 }
 
-int user_signup(MYSQL *conn, int sfd)
+int user_signup(MYSQL *conn, int sfd, char *client_ip)
 {
 	Data_pac data_pac;
 
@@ -142,7 +142,7 @@ int user_signup(MYSQL *conn, int sfd)
 			data_pac.state = 8; //表示用户注册名重名
 			sendn(sfd, (char *)&data_pac.len, data_pac.len + 6);
 			
-			syslog(LOG_INFO|LOG_USER, "username=%s 注册失败，重名\n", user_name);
+			syslog(LOG_INFO|LOG_USER, "IP=%s username=%s 注册失败，重名\n", client_ip, user_name);
 		}
 		else if(db_num_rows == 0)
 		{
@@ -218,7 +218,7 @@ int user_signup(MYSQL *conn, int sfd)
 	data_pac.len = strlen(data_pac.buf);
 	sendn(sfd, (char *)&data_pac, data_pac.len + 6);
 	
-	syslog(LOG_INFO|LOG_USER, "username=%s 注册成功\n", user_name);
+	syslog(LOG_INFO|LOG_USER, "IP=%s username=%s 注册成功\n", client_ip, user_name);
 
 	return 1; //表示注册成功
 }
