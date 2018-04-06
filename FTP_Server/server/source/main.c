@@ -167,7 +167,9 @@ int main(int argc, char *argv[])
 				{
 					pthread_join(pfactory->pthid[j], NULL);	//回收子线程
 				}
+
 				printf("main thread exit...pid=%d\n", getpid());
+				que_destroy(pq);
 				mysql_close(conn);
 				closelog(); //日志
 				exit(0); //主线程最后退出

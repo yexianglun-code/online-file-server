@@ -58,7 +58,10 @@ void que_destroy(pque_t pq)	//销毁队列
 	}
 	pnode_t pre, p;
 	pre = pq->que_head;
-	p = pre->nd_next;
+	if(NULL != pre)
+	{
+		p = pre->nd_next;
+	}
 	while(pre != NULL)
 	{
 		free(pre);
